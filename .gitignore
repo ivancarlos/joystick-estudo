@@ -25,3 +25,4 @@ cscope.po.out
 .local.vimrc
 
 # End of https://www.gitignore.io/api/tags
+.vars
