@@ -1,0 +1,135 @@
+PREFIX=/usr
+DATADIR=${PREFIX}/share/wordwarvi
+MANDIR?=${PREFIX}/share/man
+MANPAGEDIR=${MANDIR}/man6
+
+SCREENSAVERFLAG=
+#SCREENSAVERFLAG=-DDO_INHIBIT_SCREENSAVER
+
+# To compile withaudio, WITHAUDIO=yes, 
+# for no audio support, change to WITHAUDIO=no, 
+WITHAUDIO=yes
+# WITHAUDIO=no
+
+ifeq (${WITHAUDIO},yes)
+SNDLIBS=`pkg-config --libs portaudio-2.0 vorbisfile`
+SNDFLAGS=-DWITHAUDIOSUPPORT `pkg-config --cflags portaudio-2.0`
+OGGOBJ=ogg_to_pcm.o
+else
+SNDLIBS=
+SNDFLAGS=-DWWVIAUDIO_STUBS_ONLY
+OGGOBJ=
+endif
+
+CC ?= gcc
+BUILD_CC ?= gcc
+
+# DEBUG=-g
+# DEBUG=
+# PROFILE_FLAG=-pg
+#PROFILE_FLAG=
+#OPTIMIZE_FLAG=
+# OPTIMIZE_FLAG=-O3
+#OPTIMIZE_FLAG=-O3 -pedantic -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security
+OPTIMIZE_FLAG=-O3 -pedantic
+
+
+LDFLAGS=${PROFILE_FLAG}
+
+DEFINES=${SNDFLAGS} -DDATADIR=\"${DATADIR}/\"
+
+all:	wordwarvi wordwarvi.6.gz
+
+HAS_PORTAUDIO_2_0:
+ifeq (${WITHAUDIO},yes)
+	pkg-config --print-errors --exists portaudio-2.0
+else
+endif
+
+HAS_VORBISFILE:
+ifeq (${WITHAUDIO},yes)
+	pkg-config --print-errors --exists vorbisfile
+else
+endif
+
+joystick.o:	joystick.c joystick.h Makefile
+	$(CC) ${DEBUG} ${PROFILE_FLAG} ${OPTIMIZE_FLAG} -pthread -Wall -c joystick.c
+
+ogg_to_pcm.o:	ogg_to_pcm.c ogg_to_pcm.h Makefile
+	$(CC) ${DEBUG} ${PROFILE_FLAG} ${OPTIMIZE_FLAG} `pkg-config --cflags vorbisfile` \
+		-pthread -Wall -c ogg_to_pcm.c
+
+wwviaudio.o:	wwviaudio.c wwviaudio.h ogg_to_pcm.h my_point.h Makefile
+	$(CC) -Wall ${DEBUG} ${PROFILE_FLAG} ${OPTIMIZE_FLAG} \
+		${DEFINES} \
+		-pthread `pkg-config --cflags vorbisfile` \
+		-c wwviaudio.c
+
+rumble.o:	rumble.c rumble.h Makefile
+	$(CC) ${DEBUG} ${PROFILE_FLAG} ${OPTIMIZE_FLAG} `pkg-config --cflags vorbisfile` \
+		-pthread -Wall -c rumble.c
+
+wwvi_font.o:	wwvi_font.c wwvi_font.h my_point.h Makefile
+	$(CC) ${DEBUG} ${PROFILE_FLAG} ${OPTIMIZE_FLAG} -pthread -Wall -c wwvi_font.c
+
+stamp:	stamp.c
+	$(BUILD_CC) -o stamp stamp.c
+
+wordwarvi:	wordwarvi.c joystick.o rumble.o ${OGGOBJ} wwviaudio.o wwvi_font.o \
+		Makefile version.h stamp levels.h rumble.h
+	./stamp > stamp.h
+	$(CC) ${DEBUG} ${PROFILE_FLAG} ${OPTIMIZE_FLAG} ${SCREENSAVERFLAG} -pthread -Wall  ${DEFINES} \
+		joystick.o \
+		rumble.o \
+		wwvi_font.o \
+		${OGGOBJ} \
+		wwviaudio.o \
+		wordwarvi.c -o wordwarvi -lm ${SNDLIBS} \
+		`pkg-config --cflags gtk+-2.0` `pkg-config --libs gtk+-2.0 gthread-2.0`
+	/bin/rm stamp.h
+
+wordwarvi.6.gz:	wordwarvi.6
+	gzip -c wordwarvi.6 > wordwarvi.6.gz
+
+install: wordwarvi wordwarvi.6.gz
+	mkdir -p $(DESTDIR)$(PREFIX)/bin
+	mkdir -p $(DESTDIR)$(DATADIR)/sounds
+	mkdir -p $(DESTDIR)$(MANPAGEDIR)
+	install -p -m 755 wordwarvi $(DESTDIR)$(PREFIX)/bin
+	install -p -m 644 sounds/*.ogg $(DESTDIR)$(DATADIR)/sounds
+	install -p -m 644 wordwarvi.6.gz $(DESTDIR)$(MANPAGEDIR)
+
+uninstall:
+	/bin/rm -f $(DESTDIR)${PREFIX}/bin/wordwarvi
+	/bin/rm -fr $(DESTDIR)${DATADIR}
+	/bin/rm -f $(DESTDIR)${MANPAGEDIR}/wordwarvi.6.gz
+
+CHECK_VERSION:
+	@echo Checking VERSION string ${VERSION}... 1>&2
+	@echo ${VERSION} | grep '[0-9][0-9]*[.][0-9][0-9]*' > /dev/null 2>&1
+	@echo VERSION=${VERSION} which looks ok. 1>&2
+	@echo Checking that ${VERSION} matches what is in version.h 1>&2
+	@grep ${VERSION} version.h > /dev/null 2>&1
+	@echo VERSION ${VERSION} matches cursory check of version.h 1>&2
+
+tarball:	CHECK_VERSION
+	mkdir -p d/wordwarvi-${VERSION}/sounds
+	cp Makefile version.h ogg_to_pcm.c ogg_to_pcm.h levels.h rumble.c rumble.h \
+		joystick.c joystick.h changelog.txt wordwarvi.c wordwarvi.6 \
+		wwviaudio.c wwviaudio.h my_point.h wwvi_font.h wwvi_font.c \
+		stamp.c README AUTHORS COPYING \
+		AAA_HOW_TO_MAKE_NEW_LEVELS.txt \
+		changelog.txt wordwarvi_hacking.html bigrocket.png \
+		d/wordwarvi-${VERSION}
+	cp sounds/*.ogg d/wordwarvi-${VERSION}/sounds
+	cp sounds/Attribution.txt d/wordwarvi-${VERSION}/sounds
+	mkdir -p d/wordwarvi-${VERSION}/icons
+	cp icons/*.png icons/*.xcf d/wordwarvi-${VERSION}/icons
+	chown -R root:root d;
+	( cd d; tar cvf ../wordwarvi-${VERSION}.tar ./wordwarvi-${VERSION} )
+	gzip wordwarvi-${VERSION}.tar
+
+clean:
+	rm -f ./wordwarvi ./wordwarvi-*.tar.gz wordwarvi.6.gz stamp.h stamp
+	rm -f ./joystick.o  ./ogg_to_pcm.o  ./rumble.o  ./wwviaudio.o ./wwvi_font.o
+	rm -fr ./d
